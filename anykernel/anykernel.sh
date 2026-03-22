@@ -4,7 +4,7 @@
 ## AnyKernel setup
 # begin properties
 properties() {
-kernel.string=SmokeR24.1-stable
+kernel.string=camera/v4l2-bringup-build21
 do.devicecheck=1
 do.modules=0
 do.cleanup=1
