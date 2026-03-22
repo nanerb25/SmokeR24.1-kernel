@@ -112,7 +112,6 @@
 struct tegra_mipi {
 	struct device *dev;
 	struct clk *mipi_cal_clk;
-	struct clk *mipi_cal_fixed;
 	struct regmap *regmap;
 	struct mutex lock;
 	atomic_t refcount;
@@ -122,7 +121,7 @@ static const struct regmap_config t124_mipi_cal_regmap_config = {
 	.reg_bits = 32,
 	.reg_stride = 4,
 	.val_bits = 32,
-	.cache_type = REGCACHE_NONE,
+	.cache_type = REGCACHE_RBTREE,
 };
 
 static struct tegra_mipi *get_mipi(void)
@@ -151,27 +150,15 @@ static struct tegra_mipi *get_mipi(void)
 
 static int tegra_mipi_clk_enable(struct tegra_mipi *mipi)
 {
-	int err;
-
-	if (mipi->mipi_cal_fixed) {
-		err = clk_prepare_enable(mipi->mipi_cal_fixed);
-		if (err)
-			return err;
-	}
-	err = clk_prepare_enable(mipi->mipi_cal_clk);
-	if (err && mipi->mipi_cal_fixed)
-		clk_disable_unprepare(mipi->mipi_cal_fixed);
-	return err;
+	return clk_prepare_enable(mipi->mipi_cal_clk);
 }
 
 static void tegra_mipi_clk_disable(struct tegra_mipi *mipi)
 {
 	clk_disable_unprepare(mipi->mipi_cal_clk);
-	if (mipi->mipi_cal_fixed)
-		clk_disable_unprepare(mipi->mipi_cal_fixed);
 }
 
-static int tegra_mipi_wait(struct tegra_mipi *mipi, int lanes)
+static int tegra_mipi_wait(struct tegra_mipi *mipi)
 {
 	unsigned long timeout;
 	int val;
@@ -185,18 +172,17 @@ static int tegra_mipi_wait(struct tegra_mipi *mipi, int lanes)
 	timeout = jiffies + msecs_to_jiffies(MIPI_CAL_TIMEOUT_MSEC);
 	while (time_before(jiffies, timeout)) {
 		regmap_read(mipi->regmap, CIL_MIPI_CAL_STATUS, &val);
-		if (((val & lanes) == lanes) && !(val & CAL_ACTIVE))
+		if (!(val & CAL_ACTIVE) && (val & CAL_DONE))
 			return 0;
 		usleep_range(10, 100);
 	}
 
 	/* Re-check after timeout (may have slept past) */
 	regmap_read(mipi->regmap, CIL_MIPI_CAL_STATUS, &val);
-	if (((val & lanes) == lanes) && !(val & CAL_ACTIVE))
+	if (!(val & CAL_ACTIVE) && (val & CAL_DONE))
 		return 0;
 
-	dev_err(mipi->dev, "MIPI cal timeout, status: 0x%x, lanes: 0x%x\n",
-		val, lanes);
+	dev_err(mipi->dev, "MIPI cal timeout, status: 0x%x\n", val);
 	return -ETIMEDOUT;
 }
 
@@ -297,7 +283,7 @@ static int _tegra_mipi_calibration(struct tegra_mipi *mipi, int lanes)
 		     CAL_NOISE_FLT(0xa) | CAL_PRESCALE(0x2) | CAL_CLKEN_OVR);
 
 	/* Trigger and wait for calibration */
-	err = tegra_mipi_wait(mipi, lanes);
+	err = tegra_mipi_wait(mipi);
 
 	tegra_mipi_clk_disable(mipi);
 err_unlock:
@@ -383,6 +369,7 @@ static int tegra_mipi_probe(struct platform_device *pdev)
 	struct tegra_mipi *mipi;
 	struct resource *mem;
 	void __iomem *regs;
+	// ======== Key modification: Deleted the unused variable 'int err'; ========
 
 	mipi = devm_kzalloc(&pdev->dev, sizeof(*mipi), GFP_KERNEL);
 	if (!mipi)
@@ -420,12 +407,6 @@ static int tegra_mipi_probe(struct platform_device *pdev)
 					  : -ENODEV;
 	}
 
-	mipi->mipi_cal_fixed = clk_get_sys("mipi-cal-fixed", NULL);
-	if (IS_ERR(mipi->mipi_cal_fixed)) {
-		dev_warn(&pdev->dev, "cannot get mipi-cal-fixed clock, proceeding without\n");
-		mipi->mipi_cal_fixed = NULL;
-	}
-
 	mutex_init(&mipi->lock);
 	atomic_set(&mipi->refcount, 0);
 	platform_set_drvdata(pdev, mipi);
@@ -438,8 +419,6 @@ static int tegra_mipi_remove(struct platform_device *pdev)
 {
 	struct tegra_mipi *mipi = platform_get_drvdata(pdev);
 
-	if (mipi->mipi_cal_fixed)
-		clk_put(mipi->mipi_cal_fixed);
 	if (mipi->mipi_cal_clk)
 		clk_put(mipi->mipi_cal_clk);
 
