@@ -44,7 +44,7 @@
 #include <linux/alarmtimer.h>
 #include <linux/power/battery-charger-gauge-comm.h>
 #include <linux/workqueue.h>
-#include "../../../arch/arm/mach-tegra/board.h"
+#include "../../arch/arm/mach-tegra/board.h"
 #define MAX_STR_PRINT 50
 
 #define bq_chg_err(bq, fmt, ...)			\
@@ -59,6 +59,9 @@
 #define BQ2419x_TEMP_H_CHG_DISABLE	50
 #define BQ2419x_TEMP_L_CHG_DISABLE	0
 #define BQ2419x_SW_CHG_CURRENT_LIMIT	2000
+
+/* TEMPFIX: Stub the missing function */
+/* static inline int tegra_get_board_battery_id(void) { return 0; } */
 
 /* input current limit */
 static const unsigned int iinlim[] = {
